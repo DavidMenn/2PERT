@@ -295,8 +295,11 @@ class CoolingSystem(Component): #This object should be used to calculate stersse
 
             self.Twglist[ind] = QdotdiffMinimizer(self.staticnozzleparameters, gassidearea, self.thrustchamber.machInterpolator(x),
                                             self.params['gamma'],Tri, Tc, self.twlist[ind], coolantpressure, self.vlist[ind], self.hydraulicdiamlist[ind],
-                                            self.coolingfactorlist[ind],self.heatingfactorlist[ind], rgas, self.nlist[ind], fincoolingfactorfunc_atstation,
-                                            helicity = self.staticnozzleparameters['helicitylist'][ind])
+                                            self.coolingfactorlist[ind],self.heatingfactorlist[ind], rgas, self.nlist[ind], fincoolingfactorfunc_atstation)
+                                            #helicity = self.staticnozzleparameters['helicitylist'][ind])
+                                            #Currently, helicity implementation casuses disconitnuities. Uncomment if curious!
+                                            #Likely caused by improper scaling of helicity effect. Discontinuity is minor,
+                                            # but makes the graphs very ugly while not affecting FOS
             self.hglist[ind] = self.heatingfactorlist[ind]*Bartz(self.staticnozzleparameters['throatdiameter'], self.staticnozzleparameters['viscosityns'],
                                 self.staticnozzleparameters['prandtlns'], self.staticnozzleparameters['cpns'],
                                 self.staticnozzleparameters['pcns'], self.staticnozzleparameters['cstar'],
@@ -378,7 +381,8 @@ class CoolingSystem(Component): #This object should be used to calculate stersse
             #update twglist by mupltipliyng Qdot by dt, then divide by heat capacity and mass CURRENTLY ASSUMING MASS IS HALF OF TOTAL FOR CHANEL
             self.Twglist[ind] =self.Twglist[ind] + dt*(self.Qdotlist[ind] - Qdot_throughwall)*self.dxlist[ind] /(self.Vollist[ind]/2*self.matprops['rho']* self.matprops['cp']((self.Twglist[ind]+self.Twclist[ind])/2))
 
-            #Check huzel and huang page 98 for graph of effect of helicity on hc
+            #Check huzel and huang page 98 for graph of effect of helicity on hc\
+            #Helicity is retained here, while it is not used in equilibiurm calcs. Ugly discontinuity arises!
             turningangle = math.pi/2-self.helicitylist[ind]
             curvature_enhancement_factor =  np.max([1,np.min([1.4/18*turningangle*180/math.pi-1.4/18*20+1, 1.4,
             -1.4/20*turningangle*180/math.pi+1.4/20*80])])#cheesy linear interp
@@ -407,13 +411,13 @@ class CoolingSystem(Component): #This object should be used to calculate stersse
 
     def GenerateCad(self, outputFilePath, externalWall, method=None): #externalWall is how far away the wall is from the top of the chanels, can be a number or a list with size xlist.size
         if method is None:
-            xlistnew, ylistnew, zlistnew, hydraulicdiamlistnew, chlistnew = ChanelBean(self.xlist, self.rlist,
+            self.xlistnew, self.ylistnew, self.zlistnew, self.hydraulicdiamlistnew, self.chlistnew = ChanelBean(self.xlist, self.rlist,
                                                                                        self.twlist,
                                                                                        self.helicitylist, self.chlist,
                                                                                        self.cwlist)
         else:
             try: #feel fre to add methods as functions below, chanle box corners already exists and is useful for CFD as it just creates the guiding curves for the corners of a box
-                xlistnew, ylistnew, zlistnew, hydraulicdiamlistnew, chlistnew = globals()[method]()
+                self.xlistnew, self.ylistnew, self.zlistnew, self.hydraulicdiamlistnew, self.chlistnew = globals()[method]()
             except:
                 print("CAD method passed does not exist")
 
@@ -428,20 +432,20 @@ class CoolingSystem(Component): #This object should be used to calculate stersse
             except:
                 print("invalid argument passed for externalWall")
 
-        for index in range(0, xlistnew.shape[0]):
+        for index in range(0, self.xlistnew.shape[0]):
             with open(os.path.join(outputFilePath, f"ThrustChamber_Curve{index}.sldcrv"), "w") as f:
-                for i in range(len(xlistnew[1, :])):
-                    # print(f"{xchanel[i]} {ychanel[i]} {zchanel[i]}", file=f) # this if for olivers axis's
-                    print(f"{ylistnew[index, i]} {xlistnew[index, i]} {zlistnew[index, i]}",
+                for i in range(len(self.xlistnew[1, :])):
+                    print(f"{self.ylistnew[index, i]} {self.xlistnew[index, i]} {self.zlistnew[index, i]}",
                           file=f)  # this if for roberts axis's
 
         with open(os.path.join(outputFilePath, "internalradius.sldcrv"), "w") as f:
             for i in range(len(self.xlist)):
                 print(f"{self.xlist[i]} {self.rlist[i]} {0}", file=f)
-        newxlist, externalrlist = rlistExtender(self.xlist, self.rlist, ewlist + np.flip(self.chlist) + np.flip(self.twlist))
+        self.newxlist, self.externalrlist = rlistExtender(self.xlist, self.rlist, ewlist + np.flip(self.chlist) + np.flip(self.twlist))
         with open(os.path.join(outputFilePath, "externalradius.sldcrv"), "w") as f:
             for i in range(len(self.xlist)):
-                print(f"{newxlist[i]} {externalrlist[i]} {0}", file=f)
+                print(f"{self.newxlist[i]} {self.externalrlist[i]} {0}", file=f)
+                
 # ns stands for nozzle start, use finite area combustor CEA to find it (or just use pc and tcomb)
 # This equation neglects g because you dont need it for si units (i think)
 def Bartz(throatdiameter, viscosityns, prandtlns, cpns, pcns, cstar, throatRadiusCurvature, at, a, twg, tcns, mach,
@@ -460,13 +464,7 @@ def recoveryTemp(temp, gam, mach, Pr=None):
     return Taw * (1 + (r * (mach ** 2) * ((gam - 1) / 2)))
 
 
-def qdotdiffMinimizer(staticnozzleparams, a, mach, gamma,
-                      Tri, Tc, tw, coolantpressure, coolantvelocity, hydraulicdiam, coolingfactor, heatingfactor):
-    return scipy.optimize.minimize_scalar(qdotdiff, bounds=(350, Tri), tol=10, method='bounded',
-                                          args=(staticnozzleparams, a, mach, gamma,
-                                                Tri, Tc, tw, coolantpressure, coolantvelocity, hydraulicdiam,
-                                                coolingfactor, heatingfactor))[
-        'x']  # going to find root of qdotdiff for twg
+
 
 
 def QdotdiffMinimizer(staticnozzleparams, a, mach, gamma,
@@ -480,21 +478,7 @@ def QdotdiffMinimizer(staticnozzleparams, a, mach, gamma,
         'x']  # going to find root of qdotdiff for twg
 
 
-def qdotdiff(Twgi, staticnozzleparams, a, mach, gamma,
-             Tri, Tc, tw, coolantpressure, coolantvelocity, hydraulicdiam, coolingfactor, heatingfactor):
-    hgi = heatingfactor * Bartz(staticnozzleparams['throatdiameter'], staticnozzleparams['viscosityns'],
-                                staticnozzleparams['prandtlns'], staticnozzleparams['cpns'],
-                                staticnozzleparams['pcns'], staticnozzleparams['cstar'],
-                                staticnozzleparams['throatRadiusCurvature'],
-                                staticnozzleparams['at'],
-                                a, Twgi, staticnozzleparams['tcns'], mach, gamma)
-    qdotguess = hgi * (Tri - Twgi)
-    Twci = Twgi - ((qdotguess * tw) / staticnozzleparams['kw'](Twgi))  # get the initial guess
-    Twci = Twgi - ((qdotguess * tw) / staticnozzleparams['kw']((Twgi + Twci) / 2))  # now use avg wall temp
-    hci = hc(Twci, Tc, coolantpressure, coolantvelocity, hydraulicdiam, staticnozzleparams['pObj'],
-             staticnozzleparams['pObjWater'], staticnozzleparams['ethpercent'], coolingfactor)
-    qdothc = hci * (Twci - Tc)
-    return abs(qdothc - qdotguess)
+
 
 
 def Qdotdiff(Twgi, staticnozzleparams, a, mach, gamma,

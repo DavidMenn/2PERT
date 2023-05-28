@@ -19,7 +19,7 @@ import Analysis.FirstOrderCalcs as FAC
 import Components.StructuralApproximation as SA
 
 
-configtitle = "Subscale OOP 5_24_23"
+configtitle = "Subscale OOP Test 2 5_24_23"
 output = True
 
 path = os.path.join("Outputs", configtitle)
@@ -30,25 +30,21 @@ if output:
 args = {
     'thrust': 1200 * const.lbToN,  # Newtons
     'time': 7.5,  # s
-    # 'rho_ox' : 1141, #Kg/M^3
-    # 'rho_fuel' : 842,
     'pc': 300 * const.psiToPa,
     'pe': 10 * const.psiToPa,
-    # 'phi':1,
-    # 'cr': 5.295390217,
     'lstar': 1.24,
     'fuelname': 'Ethanol_75',
     'oxname': 'N2O',
     'throat_radius_curvature': .0254 * 2,
     'dp': 150 * const.psiToPa,
-    'impulseguess': 495555.24828424345,
     'rc': .08,
     'thetac': (35 * math.pi / 180),
-    'isp_efficiency': .9}  # 623919}
+    'isp_efficiency': .9} 
 
 ispmaxavg, mrideal, phiideal, ispmaxeq, ispmaxfrozen = DOMR.optimalMr(args)
 print(f"isp max = {ispmaxavg}, ideal mr is {mrideal}")
 args['rm'] = mrideal
+
 params = FAC.SpreadsheetSolver(args)
 
 # now do it again with cr instead of rc to get all the specific values for finite combustors
@@ -308,21 +304,14 @@ if output:
 
     # Add a color bar which maps values to colors.
     fig.colorbar(surf, shrink=0.5, aspect=5)"""
+    with open(os.path.join(path,'mass_output.csv'), 'w') as f:
+        for key in params.keys():
+            f.write("%s,%s\n"%(key,params[key]))
 
     plt.show()
 
     print("end")
 
 if ~output:
-    params['mi'] = mis
-    params['L'] = lambdas
-    params['M'] = totalmasses
-    params['wstruct'] = wstruct
-    params['newheight'] = newheight
-    params['heightox'] = heightox
-    params['heightfuel'] = heightfuel
-    params['vol_ox'] = vol_ox
-    params['vol_fuel'] = vol_fuel
-    params['P_tank'] = P_tank
-    params['twg_max'] = np.max(Twglist)
-    params['twc_max'] = np.max(Twclist)
+    params['twg_max'] = np.max(CS.Twglist)
+    params['twc_max'] = np.max(CS.Twclist)

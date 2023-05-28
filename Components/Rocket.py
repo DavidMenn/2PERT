@@ -5,30 +5,38 @@ import matplotlib.pyplot as plt
 from rocketcea.cea_obj_w_units import CEA_Obj
 from ambiance import Atmosphere
 import Components.StructuralApproximation as SA
-from Toolbox import PressureDropCalculator as PD
+
+heights = np.linspace(-5e3, 80e3, num=1000)  # https://pypi.org/project/ambiance/
+atmosphere = Atmosphere(heights)
+
+PressureInterpolator = interpolate.interp1d(np.concatenate((heights, [50000000]), axis=0),
+                                            np.concatenate((atmosphere.pressure, [0]), axis=0), kind='linear')
+DensityInterpolator = interpolate.interp1d(np.concatenate((heights, [50000000]), axis=0),
+                                            np.concatenate((atmosphere.density, [0]), axis=0), kind='linear')
+CdInterpolator = interpolate.interp1d([0, 1, 2, 3, 4, 5, 6, 7, 8, 1000],
+                                        [.1, .5, .4, .3, .15, .12, .10, .09, .08, 0], kind='cubic')
+
 class Rocket(object):
-    heights = np.linspace(-5e3, 80e3, num=1000)  # https://pypi.org/project/ambiance/
-    atmosphere = Atmosphere(heights)
+    
 
-    PressureInterpolator = interpolate.interp1d(np.concatenate((heights, [50000000]), axis=0),
-                                                np.concatenate((atmosphere.pressure, [0]), axis=0), kind='linear')
-    DensityInterpolator = interpolate.interp1d(np.concatenate((heights, [50000000]), axis=0),
-                                               np.concatenate((atmosphere.density, [0]), axis=0), kind='linear')
-    CdInterpolator = interpolate.interp1d([0, 1, 2, 3, 4, 5, 6, 7, 8, 1000],
-                                          [.1, .5, .4, .3, .15, .12, .10, .09, .08, 0], kind='cubic')
-
-    def __init__(self, components : dict):
+    def __init__(self, params, components : dict):
         self.components = components
+        self.params = params
 
-    def step(self,dt):
+    def Step(self,dt):
         pass #This shoudl take every component and call its step method,
             # as well as stepping the altitude
 
-    def equilibiurm(self,dt):
-        pass # This should call each components equilbrium method
+    def Equilibiurm(self,dt):
+        if "StructuralApproximation" in self.components:
+            self.h, self.hlist, self.vlist, self.thrustlist, self.isplist, self.machlist = rocketEquationCEA(self.params, self.components["StructuralApproximation"].mis)
+        elif "mi" in self.params:
+            self.h, self.hlist, self.vlist, self.thrustlist, self.isplist, self.machlist = rocketEquationCEA(self.params, self.params['mi'])
+
+        
 
 
-def rocketEquation(isp, mi=None, thrust=None, burntime=None, L=None, H=None, dt=None, Af=None):
+def rocketEquation(isp, mi, thrust, burntime, dt=None, Af=None):
     # configure this for a new "none" each time you want to try to calculate some other thing
     if dt is None:
         dt = .05
@@ -36,95 +44,48 @@ def rocketEquation(isp, mi=None, thrust=None, burntime=None, L=None, H=None, dt=
     if Af is None:
         Af = math.pi * (12 * .0254 / 2) ** 2  # frontal area, 12 in rocket
 
-    if H is None:
 
-        expectedTime = int((burntime + 180) / dt)
-        vlist = np.zeros(expectedTime)
-        hlist = np.zeros(expectedTime)
-        h = 0
-        v = 0
+    expectedTime = int((burntime + 180) / dt)
+    vlist = np.zeros(expectedTime)
+    hlist = np.zeros(expectedTime)
+    h = 0
+    v = 0
 
-        mdot = thrust / (9.81 * isp)
-        Mp = mdot * burntime
-        if mi is None:
-            mi = (1 / L) * Mp - Mp
-        M = mi + Mp
-        ind = 0
+    mdot = thrust / (9.81 * isp)
+    Mp = mdot * burntime
+    if mi is None:
+        mi = (1 / L) * Mp - Mp
+    M = mi + Mp
+    ind = 0
 
-        if thrust < M * 9.81:
-            raise Exception(f"Thrust too low (Thrust = {thrust}, M = {M})")
+    if thrust < M * 9.81:
+        raise Exception(f"Thrust too low (Thrust = {thrust}, M = {M})")
 
-        for t in np.arange(0, burntime + dt / 2, dt):
-            cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
-            D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-            M = M - mdot * dt
-            h = h + v * dt
-            v = v + 9.81 * isp * math.log((M + mdot * dt) / M, math.e) - 9.81 * dt + D / M * dt;
-            vlist[ind] = v
-            hlist[ind] = h
-            ind = ind + 1
+    for t in np.arange(0, burntime + dt / 2, dt):
+        cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
+        D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
+        M = M - mdot * dt
+        h = h + v * dt
+        v = v + 9.81 * isp * math.log((M + mdot * dt) / M, math.e) - 9.81 * dt + D / M * dt;
+        vlist[ind] = v
+        hlist[ind] = h
+        ind = ind + 1
 
-        while v > 0:
-            h = h + v * dt
-            cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
-            D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-            v = v - 9.81 * dt + D / M * dt
-            vlist[ind] = v
-            hlist[ind] = h
-            ind = ind + 1
+    while v > 0:
+        h = h + v * dt
+        cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
+        D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
+        v = v - 9.81 * dt + D / M * dt
+        vlist[ind] = v
+        hlist[ind] = h
+        ind = ind + 1
 
-        return h, hlist, vlist
+    return h, hlist, vlist
 
-    elif L is None and mi is None:
-        L = .5
-        h = 0
-        while h < H or h > H + 1000:
-            expectedTime = int((burntime + 180) / dt)
-            vlist = np.zeros(expectedTime)
-            hlist = np.zeros(expectedTime)
-            # if h < H:
-            #    L = L + .005
-            # else:
-            #    L = L - .0005
-
-            L = L + .1 * (1 - h / H)
-            print(L)
-
-            expectedTime = int((burntime + 180) / dt)
-            vlist = np.zeros(expectedTime)
-            hlist = np.zeros(expectedTime)
-            h = 0
-            v = 0
-
-            mdot = thrust / (9.81 * isp)
-            Mp = mdot * burntime
-            mi = (1 / L) * Mp - Mp
-            M = mi + Mp
-            ind = 0
-
-            for t in np.arange(0, burntime + dt / 2, dt):
-                cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
-                D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-                M = M - mdot * dt
-                h = h + v * dt
-                v = v + 9.81 * isp * math.log((M + mdot * dt) / M, math.e) - 9.81 * dt + D / M * dt
-                vlist[ind] = v
-                hlist[ind] = h
-                ind = ind + 1
-
-            while v > 0:
-                h = h + v * dt
-                cdtemp = CdInterpolator(v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h)))
-                D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-                v = v - 9.81 * dt + D / M * dt
-                vlist[ind] = v
-                hlist[ind] = h
-                ind = ind + 1
-
-        return L, hlist, vlist
+ 
 
 
-def ShitPlotter(hlist, vlist, thrustlist, isplist, machlist, time=None, title=None, dt=None):
+def Plotter(hlist, vlist, thrustlist, isplist, machlist, time=None, title=None, dt=None):
     # MAKE THIS PLOT VELO, Height, and Acceleration in m, m/sm and m/s^2 on the same plot
     # Make this plot velo height and accel in mach, km, and g's
     # Make this plot density, pressure as fuinction of altitude pls
@@ -159,152 +120,82 @@ def ShitPlotter(hlist, vlist, thrustlist, isplist, machlist, time=None, title=No
     axs[1, 2].set_title('Isp (sec)')
 
 
-def rocketEquationCEA(params, mi=None, thrust=None, burntime=None, L=None, H=None, dt=None, Af=None,
-                      ispcorrection=None):
+def rocketEquationCEA(params, mi):
     # configure this for a new "none" each time you want to try to calculate some other thing
-    if dt is None:
-        dt = .05
 
-    # if ispcorrection is None:
-    ispcorrection = 1  # This is legacy, all isp corrections should be done before you get to this point. Just input the right isp in params lol.
+    dt = .05
 
-    if Af is None:
-        Af = math.pi * (12 * .0254 / 2) ** 2  # frontal area, 12 in rocket
+    Af = math.pi * (12 * .0254 / 2) ** 2  # frontal area, 12 in rocket
 
-    if H is None:
+    thrust = params['thrust']
+    burntime = params['time']
+    ispcorrection = 1
+    expectedTime = int((burntime + 280) / dt)
 
-        expectedTime = int((burntime + 280) / dt)
+    try:
+        thrust = params['numengines'] * thrust
+        expectedTime = int((burntime + 180 * params['numengines']) / dt)
+    except:
+        pass
 
-        try:
-            thrust = params['numengines'] * thrust
-            expectedTime = int((burntime + 180 * params['numengines']) / dt)
-        except:
-            pass
+    vlist = np.zeros(expectedTime)
+    draglist = np.zeros(expectedTime)
+    machlist = np.zeros(expectedTime)
+    hlist = np.zeros(expectedTime)
+    thrustlist = np.zeros(expectedTime)
+    isplist = np.zeros(expectedTime)
+    h = 0
+    v = 0
 
-        vlist = np.zeros(expectedTime)
-        draglist = np.zeros(expectedTime)
-        machlist = np.zeros(expectedTime)
-        hlist = np.zeros(expectedTime)
-        thrustlist = np.zeros(expectedTime)
-        isplist = np.zeros(expectedTime)
-        h = 0
-        v = 0
+    mdot = thrust / (9.81 * params['isp'])
+    Mp = mdot * burntime
+    if mi is None:
+        mi = (1 / L) * Mp - Mp
+    M = mi + Mp
+    ind = 0
 
-        mdot = thrust / (9.81 * params['isp'])
-        Mp = mdot * burntime
-        if mi is None:
-            mi = (1 / L) * Mp - Mp
-        M = mi + Mp
-        ind = 0
+    if thrust < M * 9.81:
+        raise Exception(f"Thrust too low (Thrust = {thrust}, M = {M})")
 
-        if thrust < M * 9.81:
-            raise Exception(f"Thrust too low (Thrust = {thrust}, M = {M})")
+    for t in np.arange(0, burntime + dt / 2, dt):
+        machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
+        cdtemp = CdInterpolator(machlist[ind])
+        D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
+        M = M - mdot * dt
+        h = h + v * dt
+        v = v + 9.81 * ispcorrection * \
+            params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
+                                                Pamb=PressureInterpolator(h),
+                                                frozen=0, frozenAtThroat=0)[0] * math.log((M + mdot * dt) / M,
+                                                                                            math.e) - 9.81 * dt + D / M * dt
+        thrustlist[ind] = 9.81 * ispcorrection * \
+                            params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
+                                                                Pamb=PressureInterpolator(h),
+                                                                frozen=0, frozenAtThroat=0)[0] * mdot
+        isplist[ind] = ispcorrection * \
+                        params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
+                                                            Pamb=PressureInterpolator(h),
+                                                            frozen=0, frozenAtThroat=0)[0]
+        vlist[ind] = v
+        hlist[ind] = h
+        draglist[ind] = D
+        ind = ind + 1
+        if ind % 100 == 0:
+            print(t)
+    while v > 0:
+        h = h + v * dt
+        machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
+        cdtemp = CdInterpolator(machlist[ind])
+        D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
+        v = v - 9.81 * dt + D / M * dt
+        vlist[ind] = v
+        hlist[ind] = h
+        draglist[ind] = D
+        ind = ind + 1
+    print(f"max height reached = {h} meters")
+    return h, hlist, vlist, thrustlist, isplist, machlist
 
-        for t in np.arange(0, burntime + dt / 2, dt):
-            machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
-            cdtemp = CdInterpolator(machlist[ind])
-            D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-            M = M - mdot * dt
-            h = h + v * dt
-            v = v + 9.81 * ispcorrection * \
-                params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                   Pamb=PressureInterpolator(h),
-                                                   frozen=0, frozenAtThroat=0)[0] * math.log((M + mdot * dt) / M,
-                                                                                             math.e) - 9.81 * dt + D / M * dt
-            thrustlist[ind] = 9.81 * ispcorrection * \
-                              params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                                 Pamb=PressureInterpolator(h),
-                                                                 frozen=0, frozenAtThroat=0)[0] * mdot
-            isplist[ind] = ispcorrection * \
-                           params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                              Pamb=PressureInterpolator(h),
-                                                              frozen=0, frozenAtThroat=0)[0]
-            vlist[ind] = v
-            hlist[ind] = h
-            draglist[ind] = D
-            ind = ind + 1
-            if ind % 100 == 0:
-                print(t)
-        while v > 0:
-            h = h + v * dt
-            machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
-            cdtemp = CdInterpolator(machlist[ind])
-            D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-            v = v - 9.81 * dt + D / M * dt
-            vlist[ind] = v
-            hlist[ind] = h
-            draglist[ind] = D
-            ind = ind + 1
-        print(f"max height reached = {h} meters")
-        return h, hlist, vlist, thrustlist, isplist, machlist
-
-    elif L is None and mi is None:
-        L = .5
-        h = 0
-        while h < H or h > H + 1000:
-            expectedTime = int((burntime + 180) / dt)
-            vlist = np.zeros(expectedTime)
-            hlist = np.zeros(expectedTime)
-            machlist = np.zeros(expectedTime)
-            thrustlist = np.zeros(expectedTime)
-            isplist = np.zeros(expectedTime)
-            # if h < H:
-            #    L = L + .005
-            # else:
-            #    L = L - .0005
-
-            L = L + .1 * (1 - h / H)
-            print(L)
-
-            expectedTime = int((burntime + 180) / dt)
-            vlist = np.zeros(expectedTime)
-            hlist = np.zeros(expectedTime)
-            h = 0
-            v = 0
-
-            mdot = thrust / (9.81 * params['isp'])
-            Mp = mdot * burntime
-            mi = (1 / L) * Mp - Mp
-            M = mi + Mp
-            ind = 0
-            print(f"M = {M}")
-            if thrust < M * 9.81:
-                raise Exception(f"Thrust too low (Thrust = {thrust}, M = {M})")
-            for t in np.arange(0, burntime + dt / 2, dt):
-                machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
-                cdtemp = CdInterpolator(machlist[ind])
-                D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-                M = M - mdot * dt
-                h = h + v * dt
-                v = v + 9.81 * ispcorrection * \
-                    params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                       Pamb=PressureInterpolator(h),
-                                                       frozen=0, frozenAtThroat=0)[0] * math.log(
-                    (M + mdot * dt) / M, math.e) - 9.81 * dt + D / M * dt
-                thrustlist[ind] = 9.81 * \
-                                  ispcorrection * \
-                                  params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                                     Pamb=PressureInterpolator(h),
-                                                                     frozen=0, frozenAtThroat=0)[0] * mdot
-                isplist[ind] = ispcorrection * \
-                               params['CEA'].estimate_Ambient_Isp(Pc=params['pc'], MR=params['rm'], eps=params['er'],
-                                                                  Pamb=PressureInterpolator(h),
-                                                                  frozen=0, frozenAtThroat=0)[0]
-                vlist[ind] = v
-                hlist[ind] = h
-                ind = ind + 1
-
-            while v > 0:
-                h = h + v * dt
-                machlist[ind] = v / math.sqrt(1.4 * PressureInterpolator(h) / DensityInterpolator(h))
-                cdtemp = CdInterpolator(machlist[ind])
-                D = -(cdtemp * Af * DensityInterpolator(h) * (v ** 2)) / 2
-                v = v - 9.81 * dt + D / M * dt
-                vlist[ind] = v
-                hlist[ind] = h
-                ind = ind + 1
-        print(f"max height reached = {h} meters")
-        return L, hlist, vlist, thrustlist, isplist, machlist
+    
 
 
 def rocketEquationCEA_MassAprox(params, impulse, thrustToWeight, H, dp, dt=None, Af=None, ispcorrection=None):

@@ -7,117 +7,146 @@ import sys
 sys.path.insert(1,"./")
 import math
 from Toolbox.Constant import psiToPa, lbToKg
+from Components.Component import Component
 import os
-def StructuralApproximation(Component):
-    def mass_approx(Pc,dp, OD, rho_f,rho_ox, thrust, isp, burntime, rm, printoutput=False, outputdir = ""):
-        try:
-            fueldp = dp[0]
-            oxdp = dp[1]
-        except:
-            fueldp = dp
-            oxdp = dp
-            print('YOU SHOULD BE PASSING SEPERATE DPS')
-        strcutresweight = 50.6*lbToKg;
-        propweight =89.72*lbToKg;
-        cfuelweight =5.3*lbToKg;
-        coxweight=16.7 *lbToKg;
-        cpresweight=14.5*lbToKg;
-        cpressys= 12.21*lbToKg;
-        cfoxhole=7.7*lbToKg;
-        cav=15.03*lbToKg;
-        cTC=16.66 *lbToKg;
-        currentheight = 253.47*.0254;
-        fuelheight=8.72*.0254;
-        oxheightcurrent=37.824*.0254;
-        presheightcurrent=16*.0254;
+import Toolbox.Constant as const
 
-        diam_tank	= (OD-.1
-                        )*.0254;
-        ulox	 =0.05;
-        ulfuel	=0.05;
-        ulpres	=0.1;
-        mf = thrust/isp/9.81; #just pass mass flow rate
-        mf_ox=(rm*mf/(rm+1));
-        mf_fuel = mf/(rm+1);
-        vol_ox	= mf_ox*burntime/rho_ox;
-        vol_fuel	= mf_fuel*burntime/rho_f;
-        P_pres =	4500*psiToPa;
-        P_tank_fuel =	Pc+fueldp;
-        P_tank_ox = Pc+oxdp
-        vol_pres = (P_tank_fuel*vol_fuel)/(P_pres-P_tank_fuel)+(P_tank_ox*vol_ox)/(P_pres-P_tank_ox); #compresasbility
+class StructuralApproximation(Component):
 
+    def __init__(self,params, OD): #od of rocket in inches (legacy)
+        self.mis, self.lambdas, self.totalmasses, self.wstruct,\
+        self.newheight, self.heightox, self.heightfuel, \
+        self.vol_ox, self.vol_fuel, self.PTanks = mass_approx(params['pc'],
+        params['dp'], OD, params['rho_fuel'],params['rho_ox'], params['thrust'], params['isp'], params['time'], params['rm'])
+        self.oxpd, self.fuelpd, self.dparray = pressureDrop(OxDensityMetric = params['rho_ox'],     # kg/m^3
+                                        OxMassFlowMetric = params['mdot_ox'], # kg/s
+                                        OxTubeDiam = 3/4, #in  
+                                        FuelDensityMetric = params['rho_fuel'],       # kg/m^3
+                                        FuelMassFlowMetric = params['mdot_fuel'],# kg/s
+                                        FuelTubeDiam = 3/4 ,
+                                        params = params               )
 
-        heightox	=(vol_ox/(1-ulox))/(math.pi*(diam_tank/2)**2);
-        heightfuel	=(vol_fuel/(1-ulfuel))/(math.pi*(diam_tank/2)**2);
-        heightpres	=(vol_pres/(1-ulpres))/(math.pi*(diam_tank/2)**2);
+    def Equilibrium(self,params, OD):
+        self.mis, self.lambdas, self.totalmasses, self.wstruct,\
+        self.newheight, self.heightox, self.heightfuel, \
+        self.vol_ox, self.vol_fuel, self.PTanks = mass_approx(params['pc'],
+        params['dp'], OD, params['rho_fuel'],params['rho_ox'], params['thrust'], params['isp'], params['time'], params['rm'])
+        self.oxpd, self.fuelpd, self.dparray = pressureDrop(OxDensityMetric = params['rho_ox'],     # kg/m^3
+                                        OxMassFlowMetric = params['mdot_ox'], # kg/s
+                                        OxTubeDiam = 3/4, #in  
+                                        FuelDensityMetric = params['rho_fuel'],       # kg/m^3
+                                        FuelMassFlowMetric = params['mdot_fuel'],# kg/s
+                                        FuelTubeDiam = 3/4 ,
+                                        params = params               )
+def mass_approx(Pc,dp, OD, rho_f,rho_ox, thrust, isp, burntime, rm, printoutput=False, outputdir = ""):
+    try:
+        fueldp = dp[0]
+        oxdp = dp[1]
+    except:
+        fueldp = dp
+        oxdp = dp
+        print('YOU SHOULD BE PASSING SEPERATE DPS')
+    strcutresweight = 50.6*lbToKg;
+    propweight =89.72*lbToKg;
+    cfuelweight =5.3*lbToKg;
+    coxweight=16.7 *lbToKg;
+    cpresweight=14.5*lbToKg;
+    cpressys= 12.21*lbToKg;
+    cfoxhole=7.7*lbToKg;
+    cav=15.03*lbToKg;
+    cTC=16.66 *lbToKg;
+    currentheight = 253.47*.0254;
+    fuelheight=8.72*.0254;
+    oxheightcurrent=37.824*.0254;
+    presheightcurrent=16*.0254;
 
-        Sy = 40000*psiToPa;
-        Fs	=2;
-        rho_tank =	2710 #kg/m3
-        t_prop_fuel	=P_tank_fuel*diam_tank/(2*Sy)*Fs;
-        t_prop_ox	=P_tank_ox*diam_tank/(2*Sy)*Fs;
-        t_pres	=P_pres*diam_tank/(2*Sy)*Fs;
-
-        weight_f	=((math.pi*diam_tank*heightfuel)+2*math.pi*(diam_tank/2)**2)*t_prop_fuel*rho_tank;
-        weight_ox	=((math.pi*diam_tank*heightox)+2*math.pi*(diam_tank/2)**2)*t_prop_ox*rho_tank;
-        weight_pres	=((math.pi*diam_tank*heightpres)+2*math.pi*(diam_tank/2)**2)*t_pres*rho_tank;
-
-        massFuelTank = 0
-        massOxTank = 0
-        while abs(weight_f-massFuelTank)>.01:
-            weight_f=massFuelTank
-            weight_ox=massOxTank
-            newheight=(currentheight-(fuelheight+oxheightcurrent+presheightcurrent))*8/OD+(heightox+heightfuel+heightpres);#(currentheight-(fuelheight+oxheightcurrent+presheightcurrent))*OD/8+(heightox+heightfuel+heightpres);
-            Saratio=(newheight*math.pi/4*OD**2)/(currentheight*math.pi/4*8**2); #GET RID OF THIS
-            mdotratio=mf/(4.72*0.453592);
-            Pratio_prop=P_tank_ox/(950*psiToPa);
-            Pratio_pres=P_pres/(4500*psiToPa);
-
-            global wtc, wav, wfox, wpresys, wpres, whelium, wstruct
-
-            wtc= (57+11) * lbToKg# mdotratio*(cTC);
-            wav = (47+.5*13)*lbToKg # mdotratio*Pratio_prop*(cav); # FIX ALL THESE
-            wfox= 0 #mdotratio*Pratio_prop*(cfoxhole);
-            wpresys=0       #mdotratio*Pratio_pres*cpressys;
-            wpres=(82+.5*30) * lbToKg #(vol_pres/0.0055217851)*cpresweight; #make sure this is in metric
-            whelium=vol_pres*44.472*P_pres/(31.02*10**6); # this is denisty from refprop for 4500 psi
-
-            # # Ideally You would use these not an overall structures weight
-            massNoseCone =  15*lbToKg #11.83*lbToKg # THIS IS A GUESS
-            massFins = 40*lbToKg # THIS IS ALSO A GUESS
-            massRecovery = 41* lbToKg # 10 # THIS IS ALSO A GUESS
-            massRecoveryCoupler = 8*lbToKg;
-            massPayloadCoupler = 8 * lbToKg #2.49;
-            massAirFrames = 35*lbToKg #  19.962*newheight/currentheight #air frames mass scales with height!?
-            massPayload = 3
-            wstruct=110 #massPayload+massAirFrames+massPayloadCoupler+massRecovery+massRecoveryCoupler+massFins+massNoseCone
-            # massAVCoupler = 0;
-            # massParachuteShroud = 0;
-            # massAvionicsShroud = 0;
-            # massAvionicsShroud = 0;
-            # massIntertankBay1Shroud = 0;
-
-            #wstruct=Saratio*strcutresweight#1.369*Saratio*strcutresweight; #The factor for structural weight is in the error in newheight estimate lol its like 1.2
+    diam_tank	= (OD-.1
+                    )*.0254;
+    ulox	 =0.05;
+    ulfuel	=0.05;
+    ulpres	=0.1;
+    mf = thrust/isp/9.81; #just pass mass flow rate
+    mf_ox=(rm*mf/(rm+1));
+    mf_fuel = mf/(rm+1);
+    vol_ox	= mf_ox*burntime/rho_ox;
+    vol_fuel	= mf_fuel*burntime/rho_f;
+    P_pres =	4500*psiToPa;
+    P_tank_fuel =	Pc+fueldp;
+    P_tank_ox = Pc+oxdp
+    vol_pres = (P_tank_fuel*vol_fuel)/(P_pres-P_tank_fuel)+(P_tank_ox*vol_ox)/(P_pres-P_tank_ox); #compresasbility
 
 
-            # BREAK DOWN STUCTURES WEIGHT INTO COMPONENTS
-            oxTankThickness,fuelTankThickness, heightfuel, heightox, massOxTank, \
-            massFuelTank,fuelTankLengthTotal,oxTankLengthTotal = MetalTankMasses((OD)*0.0254, P_tank_fuel, P_tank_ox, weight_ox, vol_ox,vol_fuel, mf_ox*burntime)
+    heightox	=(vol_ox/(1-ulox))/(math.pi*(diam_tank/2)**2);
+    heightfuel	=(vol_fuel/(1-ulfuel))/(math.pi*(diam_tank/2)**2);
+    heightpres	=(vol_pres/(1-ulpres))/(math.pi*(diam_tank/2)**2);
 
-        weight_f=massFuelTank + 15 * lbToKg
-        weight_ox = massOxTank + 15 * lbToKg
-        mass_avionics = 10*lbToKg
+    Sy = 40000*psiToPa;
+    Fs	=2;
+    rho_tank =	2710 #kg/m3
+    t_prop_fuel	=P_tank_fuel*diam_tank/(2*Sy)*Fs;
+    t_prop_ox	=P_tank_ox*diam_tank/(2*Sy)*Fs;
+    t_pres	=P_pres*diam_tank/(2*Sy)*Fs;
+
+    weight_f	=((math.pi*diam_tank*heightfuel)+2*math.pi*(diam_tank/2)**2)*t_prop_fuel*rho_tank;
+    weight_ox	=((math.pi*diam_tank*heightox)+2*math.pi*(diam_tank/2)**2)*t_prop_ox*rho_tank;
+    weight_pres	=((math.pi*diam_tank*heightpres)+2*math.pi*(diam_tank/2)**2)*t_pres*rho_tank;
+
+    massFuelTank = 0
+    massOxTank = 0
+    while abs(weight_f-massFuelTank)>.01:
+        weight_f=massFuelTank
+        weight_ox=massOxTank
+        newheight=(currentheight-(fuelheight+oxheightcurrent+presheightcurrent))*8/OD+(heightox+heightfuel+heightpres);#(currentheight-(fuelheight+oxheightcurrent+presheightcurrent))*OD/8+(heightox+heightfuel+heightpres);
+        Saratio=(newheight*math.pi/4*OD**2)/(currentheight*math.pi/4*8**2); #GET RID OF THIS
+        mdotratio=mf/(4.72*0.453592);
+        Pratio_prop=P_tank_ox/(950*psiToPa);
+        Pratio_pres=P_pres/(4500*psiToPa);
+
+        global wtc, wav, wfox, wpresys, wpres, whelium, wstruct
+
+        wtc= (57+11) * lbToKg# mdotratio*(cTC);
+        wav = (47+.5*13)*lbToKg # mdotratio*Pratio_prop*(cav); # FIX ALL THESE
+        wfox= 0 #mdotratio*Pratio_prop*(cfoxhole);
+        wpresys=0       #mdotratio*Pratio_pres*cpressys;
+        wpres=(82+.5*30) * lbToKg #(vol_pres/0.0055217851)*cpresweight; #make sure this is in metric
+        whelium=vol_pres*44.472*P_pres/(31.02*10**6); # this is denisty from refprop for 4500 psi
+
+        # # Ideally You would use these not an overall structures weight
+        massNoseCone =  15*lbToKg #11.83*lbToKg # THIS IS A GUESS
+        massFins = 40*lbToKg # THIS IS ALSO A GUESS
+        massRecovery = 41* lbToKg # 10 # THIS IS ALSO A GUESS
+        massRecoveryCoupler = 8*lbToKg;
+        massPayloadCoupler = 8 * lbToKg #2.49;
+        massAirFrames = 35*lbToKg #  19.962*newheight/currentheight #air frames mass scales with height!?
+        massPayload = 3
+        wstruct=110 #massPayload+massAirFrames+massPayloadCoupler+massRecovery+massRecoveryCoupler+massFins+massNoseCone
+        # massAVCoupler = 0;
+        # massParachuteShroud = 0;
+        # massAvionicsShroud = 0;
+        # massAvionicsShroud = 0;
+        # massIntertankBay1Shroud = 0;
+
+        #wstruct=Saratio*strcutresweight#1.369*Saratio*strcutresweight; #The factor for structural weight is in the error in newheight estimate lol its like 1.2
 
 
-        mis=wtc+wav+wfox+wpresys+wpres+wstruct+weight_f+weight_ox+whelium + mass_avionics; #80 + .7*weight_f+.7*weight_ox
-        fuelmass=mf_fuel*burntime;
-        oxmass=mf_ox*burntime;
-        lambdas=(fuelmass+oxmass)/(mis+fuelmass+oxmass);
-        totalmasses=fuelmass+oxmass+mis;
+        # BREAK DOWN STUCTURES WEIGHT INTO COMPONENTS
+        oxTankThickness,fuelTankThickness, heightfuel, heightox, massOxTank, \
+        massFuelTank,fuelTankLengthTotal,oxTankLengthTotal = MetalTankMasses((OD)*0.0254, P_tank_fuel, P_tank_ox, weight_ox, vol_ox,vol_fuel, mf_ox*burntime)
+
+    weight_f=massFuelTank + 15 * lbToKg
+    weight_ox = massOxTank + 15 * lbToKg
+    mass_avionics = 10*lbToKg
+
+
+    mis=wtc+wav+wfox+wpresys+wpres+wstruct+weight_f+weight_ox+whelium + mass_avionics; #80 + .7*weight_f+.7*weight_ox
+    fuelmass=mf_fuel*burntime;
+    oxmass=mf_ox*burntime;
+    lambdas=(fuelmass+oxmass)/(mis+fuelmass+oxmass);
+    totalmasses=fuelmass+oxmass+mis;
 
 
 
-        return mis, lambdas, totalmasses, wstruct, newheight, heightox, heightfuel, vol_ox, vol_fuel, [P_tank_fuel, P_tank_ox]
+    return mis, lambdas, totalmasses, wstruct, newheight, heightox, heightfuel, vol_ox, vol_fuel, [P_tank_fuel, P_tank_ox]
 
 def mass_approx_NEW():
     """Feel free to use whatever you want as inputs, though try to keep it limited
@@ -223,3 +252,90 @@ def massCylinder(IR,OR,length):
     Area = math.pi*(OR**2-IR**2);
     mass = Area*length*density; # kg
     return mass
+
+def pressureDrop(OxDensityMetric = 1090.79390625913,     # kg/m^3
+    OxMassFlowMetric = 4.09234712442909, # kg/s
+    OxTubeDiam = 3/4, #in  
+    FuelDensityMetric = 843.4,       # kg/m^3
+    FuelMassFlowMetric = 3.28127,# kg/s
+    FuelTubeDiam = 3/4     ,
+    params = None           ):# in
+
+    if params is None:
+        params = {'pc' : 300*const.psiToPa}
+        
+    pi = math.pi # lol matlab
+    OxLength = 2;                           # length of plumbing line in feet
+    OxViscosity = 1015.24 / 1000;           # micropoise to centipoise
+
+               # kg/s
+   
+    FuelLength = 10;                        # ft
+    FuelViscosity = 1.095;                  # centipoise, approximated as 100% ethanol
+
+    bendRatio = 3;                          # radius of bend / diameter of tube; 
+                                            # r/d decreases with increased tube size. 3 is an estimate
+
+        # Constants
+    g = 32.174; # ft/s^2
+    roughness = 0.015 / 304.8; # absolute roughness of stainless steel tubing, input mm, output ft
+
+        # Calculated Variables
+    OxDensity = OxDensityMetric/16.018; # lb/ft^3
+    OxTubeDiamMetric = OxTubeDiam/39.37; #in to meters
+    OxTubeAreaMetric = (pi/4)*(OxTubeDiamMetric**2); #m^2
+    OxVelocityFlowMetric = OxMassFlowMetric/(OxDensityMetric * OxTubeAreaMetric); #m/s
+    OxVelocityFlow = OxVelocityFlowMetric*3.281;
+    OxReynold = 124*OxTubeDiam*OxVelocityFlow*OxDensity/OxViscosity;
+
+    FuelDensity = FuelDensityMetric/16.018; # lb/ft^3
+    FuelTubeDiamMetric = FuelTubeDiam/39.37; #in to meters
+    FuelTubeAreaMetric = (pi/4)*(FuelTubeDiamMetric**2); #m^2
+    FuelVelocityFlowMetric = FuelMassFlowMetric/(FuelDensityMetric * FuelTubeAreaMetric); #m/s
+    FuelVelocityFlow = FuelVelocityFlowMetric*3.281;
+    FuelReynold = 124*FuelTubeDiam*FuelVelocityFlow*FuelDensity/FuelViscosity;
+
+    # Friction Coefficient f & K(Crane 410 Page X)
+    Oxf = 0.25/(math.log(roughness/(3.7*OxTubeDiam/12) + 5.74/(OxReynold**0.9)))**2;
+    OxfTurb = 0.25/(math.log(roughness/(3.7*OxTubeDiam/12)))**2;
+
+    KOxElbow = 30*OxfTurb;
+    KOxBend = 12*OxfTurb; # Tabularly depends on bend radius (See page 
+    KOxBallValve = 3*OxfTurb;
+    KOxCheckValve = 420*OxfTurb;
+    KOxEnter = 0.78;
+    KFuelExit = 1.0;
+
+    KOx = KOxEnter + KOxBallValve + KOxCheckValve + KFuelExit;
+
+    Fuelf = 0.25/(math.log(roughness/(3.7*OxTubeDiam/12) + 5.74/(FuelReynold**0.9)))**2;
+    FuelfTurb = 0.25/(math.log(roughness/(3.7*FuelTubeDiam/12)))**2;
+
+    KFuelElbow = 30*FuelfTurb;
+    KFuelBend = 12*FuelfTurb;
+    KFuelBallValve = 3*FuelfTurb;
+    KFuelCheckValve = 420*FuelfTurb;
+    KFuelEnter = 0.78;
+    KFuelExit = 1.0;
+
+    KFuel = KFuelEnter + 2*KFuelBend + KFuelBallValve + KFuelCheckValve + KFuelExit;
+
+    # Pressure Drop (Crane 410 Page 6-4, Equation 6-22)
+    OxPressureDropFriction = 0.001295*Oxf*OxLength*OxDensity*(OxVelocityFlow**2)/OxTubeDiam;
+    OxPressureDropFittings = (OxDensity/144)*(KOx)*(OxVelocityFlow**2)/(2*g);
+
+    OxPressureDropTotal = OxPressureDropFriction + OxPressureDropFittings
+
+    FuelPressureDropFriction = 0.001295*Fuelf*FuelLength*FuelDensity*(FuelVelocityFlow**2)/FuelTubeDiam;
+    FuelPressureDropFittings = (FuelDensity/144)*(KFuel)*(FuelVelocityFlow**2)/(2*g);
+
+    FuelPressureDropTotal = FuelPressureDropFriction + FuelPressureDropFittings
+
+    dparray =  [(params['pc']*.2 + 50*const.psiToPa + FuelPressureDropTotal)*1.5, (params['pc']*.2 + OxPressureDropTotal)*1.5]
+    dparray = [150*const.psiToPa, 150*const.psiToPa]
+    return OxPressureDropTotal, FuelPressureDropTotal, dparray
+        # Note: pressureDropFriction is based on wall friction due to length of
+        # straight pipe. pressureDropFittings is due to the turbulence caused
+        # by the flow obstruction of internal geometries. It is not clear
+        # whether the length of the fittings should be subtracted from
+        # pressureDropFriction, or if the double-calculation is necessary.
